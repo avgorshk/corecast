@@ -166,3 +166,38 @@ wall time | [PASS]/[FAIL], plus exact error lines for cases 4-6.
 2. implement fetch.py (~200 lines, stdlib + subprocess only)
 3. run test cases 1-6, record the acceptance table
 4. report results; fix anything that fails; then Stage 2 discussion
+
+## 11. Implementation results (2026-09-04)
+
+Acceptance table:
+
+| # | case | result |
+|---|---|---|
+| 1 | YouTube 4eiQNRcoaWc | [PASS] 10.8 s wall |
+| 2 | Rutube aaf306b8... | [PASS] 190.5 s wall (probe-picked tier-1 rendition) |
+| 3 | VK -203057439_456239522 | [PASS] 156.0 s wall |
+| 4 | non-existent URL | [PASS] exit 1, "This video is unavailable" |
+| 5 | re-run of #1 | [PASS] [SKIP], exit 0 |
+| 5b | --force #1 | [PASS] true re-download, 10.8 s |
+| 6a | live-stream fixture | [PASS] refused before download |
+| 6b | real live URL | n/a (none live at test time); fixture covers the branch |
+
+### Deviations from the plan (evidence-driven)
+
+1. Format selection redesigned. Rutube exposes ONLY combined video+audio
+   renditions (verified: all 24 formats carry vc=avc1 + ac=mp4a.40.2), so
+   `bestaudio/best` fell through to `best` = 1080p ~19.7 Mbps -> a 3.35 GB
+   partial download before the first run timed out. New algorithm:
+   audio-only formats -> `bestaudio`; combined-only platform -> ffmpeg
+   sample-probe the smallest renditions (12 s each) and pick the first
+   whose audio is >= 64 kbps.
+2. Measured Rutube audio tiers (40 s samples): 144/240/360p = identical
+   82 kbps AAC; 476p = 160 kbps; 720/1080p = 232 kbps. Threshold 64 kbps
+   accepts tier 1 (transparent for speech ASR); tier 2+ would cost ~5x
+   wall time: Rutube serves at ~0.1-0.33 MB/s (measured), i.e. 62 MB vs
+   327 MB for this 24-min video.
+3. Probe retries (2 attempts) added after a transient Rutube probe
+   failure was observed live.
+4. --force now wipes artifacts first (yt-dlp silently skips an existing
+   audio.wav otherwise - found while validating the force path).
+5. Intermediates removed after verify; a workdir ends with audio.wav only.

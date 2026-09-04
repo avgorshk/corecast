@@ -18,7 +18,7 @@ Stage-based development, each stage is discussed and approved before
 implementation.
 
 - [x] Stage 1 plan (URL -> audio WAV): docs/stage1-plan.md
-- [ ] Stage 1 implementation
+- [x] Stage 1 implementation
 - [ ] Stage 2 (audio -> transcript)
 - [ ] Stage 3 (transcript -> summary)
 - [ ] Stage 4 (hardening / packaging)
