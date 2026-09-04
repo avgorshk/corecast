@@ -34,6 +34,9 @@ AUDIO_MIN_KBPS = 64.0     # probe threshold: speech-quality floor (~64 kbps AAC
                          # platforms (rutube ~0.3 MB/s) cost 5x wall time.
 MAX_PROBES = 4            # how many renditions to sample at most
 PROBE_SECONDS = 12        # sample length per rendition
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/126.0.0.0 Safari/537.36")
 
 
 # ------------------------------------------------------------------ utils
@@ -74,7 +77,13 @@ def fetch_meta(ytdlp, url, attempts=2):
     format list (observed transiently on VK, likely IP rate-limiting)."""
     last_err = "unknown yt-dlp error"
     for _ in range(attempts):
-        r = run([ytdlp, "-J", "--no-playlist", "--no-warnings", url])
+        try:
+            r = run([ytdlp, "-J", "--no-playlist", "--no-warnings", url],
+                    timeout=90)
+        except subprocess.TimeoutExpired:
+            last_err = "metadata request timed out"
+            time.sleep(2)
+            continue
         if r.returncode != 0:
             last_err = (r.stderr.strip().splitlines() or [last_err])[-1]
             last_err = last_err.removeprefix("ERROR: ")
@@ -176,7 +185,9 @@ def sample_audio_kbps(url, tmpdir, attempts=2):
     out = Path(tmpdir) / "probe.mka"
     for _ in range(attempts):
         r = subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", url,
+            ["ffmpeg", "-y", "-loglevel", "error",
+             "-user_agent", USER_AGENT,
+             "-i", url,
              "-t", str(PROBE_SECONDS), "-map", "0:a:0", "-c", "copy", str(out)],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=60)
@@ -210,10 +221,16 @@ def select_format(meta, verbose=False):
     if audio_only:
         return "bestaudio", f"audio-only: {best_audio_format(meta)}"
 
-    combined = [f for f in fmts
-                if f.get("acodec") not in (None, "none") and f.get("height")]
+    # candidates: anything not clearly video-only. Some platforms (VK,
+    # intermittently) report formats with UNKNOWN codecs - the probe decides.
+    def clearly_video_only(f):
+        return (f.get("vcodec") not in (None, "none")
+                and f.get("acodec") in (None, "none"))
+
+    combined = [f for f in fmts if not clearly_video_only(f)]
     if not combined:
-        return None, "no audio-only and no combined formats available"
+        return None, ("no downloadable formats (all entries are video-only "
+                      "or unsupported)")
 
     combined.sort(key=lambda f: f.get("tbr") or (f.get("height") or 0) * 10)
     print(f"[2/4] audio     -> no audio-only streams; probing renditions "
@@ -239,10 +256,11 @@ def select_format(meta, verbose=False):
     if best is None:
         f = combined[0]
         return f.get("format_id"), (f"audio-only: none; probes failed; "
-                                    f"using smallest rendition ({f.get('height')}p)")
+                                    f"using smallest candidate ({f.get('format_id')})")
     kbps, f = best
-    return f.get("format_id"), (f"audio-only: none; probed {probed} rendition(s); "
-                                f"picked {f.get('height')}p with ~{kbps:.0f} kbps audio")
+    desc = f"{f.get('height')}p" if f.get("height") else str(f.get("format_id"))
+    return f.get("format_id"), (f"audio-only: none; probed {probed} candidate(s); "
+                                f"picked {desc} with ~{kbps:.0f} kbps audio")
 
 
 # ------------------------------------------------------------------- main
@@ -326,7 +344,11 @@ def main(argv=None):
     if not args.verbose:
         cmd += ["-q"]
     cmd += [args.url]
-    r = run(cmd, cwd=str(workdir))
+    try:
+        r = run(cmd, cwd=str(workdir), timeout=1800)
+    except subprocess.TimeoutExpired:
+        print("ERROR: download timed out after 30 min (exit 1)")
+        return 1
     if r.returncode != 0 or not audio.is_file():
         tail = (r.stderr.strip().splitlines() or ["download failed"])[-1]
         tail = tail.removeprefix("ERROR: ")
