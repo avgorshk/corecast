@@ -201,3 +201,7 @@ Acceptance table:
 4. --force now wipes artifacts first (yt-dlp silently skips an existing
    audio.wav otherwise - found while validating the force path).
 5. Intermediates removed after verify; a workdir ends with audio.wav only.
+6. VK transiently returns an empty format list (observed on a 77-min video;
+   same URL succeeded seconds later). Metadata fetch now retries twice and
+   reports "no playable formats (transient or login required)" instead of a
+   misleading "no audio" error.

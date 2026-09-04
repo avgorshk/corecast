@@ -69,6 +69,31 @@ def fmt_dur(sec):
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
 
 
+def fetch_meta(ytdlp, url, attempts=2):
+    """yt-dlp -J with retry. Also retries when the platform returns an empty
+    format list (observed transiently on VK, likely IP rate-limiting)."""
+    last_err = "unknown yt-dlp error"
+    for _ in range(attempts):
+        r = run([ytdlp, "-J", "--no-playlist", "--no-warnings", url])
+        if r.returncode != 0:
+            last_err = (r.stderr.strip().splitlines() or [last_err])[-1]
+            last_err = last_err.removeprefix("ERROR: ")
+            time.sleep(2)
+            continue
+        try:
+            meta = json.loads(r.stdout)
+        except json.JSONDecodeError:
+            last_err = "could not parse yt-dlp output"
+            time.sleep(2)
+            continue
+        if meta.get("formats"):
+            return meta, None
+        last_err = ("platform returned no playable formats "
+                    "(transient or login required; try again later)")
+        time.sleep(2)
+    return None, last_err
+
+
 # ----------------------------------------------------------------- checks
 
 def check_availability(meta):
@@ -247,16 +272,9 @@ def main(argv=None):
     t0 = time.perf_counter()
 
     # [1/4] metadata (in-memory only; nothing is persisted)
-    r = run([ytdlp, "-J", "--no-playlist", "--no-warnings", args.url])
-    if r.returncode != 0:
-        tail = (r.stderr.strip().splitlines() or ["unknown yt-dlp error"])[-1]
-        tail = tail.removeprefix("ERROR: ")
-        print(f"ERROR: {tail} (exit 1)")
-        return 1
-    try:
-        meta = json.loads(r.stdout)
-    except json.JSONDecodeError:
-        print("ERROR: could not parse yt-dlp output (exit 1)")
+    meta, err = fetch_meta(ytdlp, args.url)
+    if meta is None:
+        print(f"ERROR: {err} (exit 1)")
         return 1
 
     ok, why = check_availability(meta)
