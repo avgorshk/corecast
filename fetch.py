@@ -32,6 +32,9 @@ DEFAULT_OUT = PROJECT_ROOT / "data"
 AUDIO_MIN_KBPS = 64.0     # probe threshold: speech-quality floor (~64 kbps AAC
                          # is transparent for voice). Higher tiers on throttled
                          # platforms (rutube ~0.3 MB/s) cost 5x wall time.
+AUDIO_ONLY_MIN_KBPS = 48.0  # lower floor for TRUE audio-only renditions:
+                            # 53 kbps audio-only beats 69 kbps audio buried in
+                            # a 600+ MB combined file (download economics).
 MAX_PROBES = 4            # how many renditions to sample at most
 PROBE_SECONDS = 12        # sample length per rendition
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -248,7 +251,9 @@ def select_format(meta, verbose=False):
             if kbps is not None:
                 if best is None or kbps > best[0]:
                     best = (kbps, f)
-                if kbps >= AUDIO_MIN_KBPS:
+                fid = str(f.get("format_id") or "").lower()
+                thr = AUDIO_ONLY_MIN_KBPS if "audio" in fid else AUDIO_MIN_KBPS
+                if kbps >= thr:
                     break
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
