@@ -34,8 +34,8 @@ class Api:
 def main():
     html = (PROJECT_ROOT / "ui" / "index.html").read_text(encoding="utf-8")
     webview.create_window("CoreCast", html=html, width=820, height=700,
-                          min_size=(700, 560))
-    webview.start(js_api=Api(), debug=False)
+                          min_size=(700, 560), js_api=Api())
+    webview.start()
 
 
 if __name__ == "__main__":
