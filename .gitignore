@@ -16,3 +16,4 @@ bin/
 # secrets
 .env
 sketches/
+CoreCast.lnk
