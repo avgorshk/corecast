@@ -168,6 +168,12 @@ class CLIReporter(Reporter):
         total = b["total"]
         pct = b["done"] / total * 100 if total else None
         now = time.perf_counter()
+        if total and pct >= 100:  # final tick: always print the 100% line
+            if self._last_pct != 100:
+                print(line, flush=True)
+                self._last_pct = 100.0
+                self._last_t = now
+            return
         due = (pct is not None and self._last_pct is not None
                and pct - self._last_pct >= 10) or (now - self._last_t >= 30)
         if due or self._last_pct is None:

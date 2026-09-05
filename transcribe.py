@@ -152,10 +152,12 @@ def main(argv=None):
                 timed_out = True
                 break
             if est_total:
-                rep.phase_update("transcribe", min(elapsed, est_total),
+                rep.phase_update("transcribe", min(elapsed, est_total * 0.99),
                                  est_total, {"unit": "s"})
             time.sleep(0.5)
         rc = proc.poll()
+    if est_total:
+        rep.phase_update("transcribe", est_total, est_total, {"unit": "s"})
     rep.phase_done("transcribe")
     dt = time.perf_counter() - t1
     err_text = Path(errf.name).read_text(encoding="utf-8", errors="replace")
