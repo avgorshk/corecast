@@ -31,5 +31,8 @@ implementation.
 ## Usage (planned)
 
 ```
-python fetch.py <url>
+python fetch.py <url> [--out-dir DIR] [--force] [-v] [--json-progress]
 ```
+
+- `--force`: re-download even if `audio.wav` exists
+- `--json-progress`: one JSON progress event per line (CI / GUI-ready)

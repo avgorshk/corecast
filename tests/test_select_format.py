@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from fetch import select_format  # noqa: E402
+from fetch import select_format, CLIReporter  # noqa: E402
 
 TMP = Path(os.environ.get("LOCALAPPDATA", ".")) / "Temp" / "vk3_j.json"
 
@@ -30,7 +30,7 @@ def main():
          "tbr": f.get("tbr"), "ext": f.get("ext")}
         for f in real if f.get("url")
     ]
-    sel, reason = select_format({"formats": fake_formats}, verbose=True)
+    sel, reason = select_format({"formats": fake_formats}, CLIReporter(False), verbose=True)
     print("selector:", sel)
     print("reason:", reason)
     if sel is None:
