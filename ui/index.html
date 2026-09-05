@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CoreCast</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #eef1f5; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    color: #1f2328; height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  .body { flex: 1; display: flex; flex-direction: column; gap: 16px; padding: 26px 30px 14px;
+    background: #fbfcfe; overflow: hidden; }
+  .headline { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+  .headline small { display: block; font-size: 13px; font-weight: 400;
+    color: #77818d; margin-top: 4px; }
+  label { font-size: 12px; font-weight: 600; color: #5b6672; text-transform: uppercase;
+    letter-spacing: .06em; display: block; margin-bottom: 7px; }
+  .row { display: flex; gap: 10px; }
+  #url { flex: 1; background: #fff; border: 1px solid #d8dee6; border-radius: 10px;
+    color: #1f2328; font-size: 14px; padding: 12px 14px; outline: none;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .05); }
+  #url:focus { border-color: #0969da; box-shadow: 0 0 0 3px rgba(9, 105, 218, .12); }
+  #url.err { border-color: #d1242f; box-shadow: 0 0 0 3px rgba(209, 36, 47, .1); }
+  #url::placeholder { color: #a3adba; }
+  button { font: inherit; cursor: pointer; border: none; border-radius: 10px; }
+  #go { background: #0969da; color: #fff; font-weight: 600; font-size: 15px;
+    padding: 12px 30px; box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
+  #go:hover { background: #0755b3; }
+  #go:disabled { background: #c9d3df; cursor: default; }
+  #copy { background: #fff; color: #5b6672; border: 1px solid #d8dee6;
+    font-size: 12px; padding: 6px 14px; border-radius: 8px; }
+  #copy:hover { border-color: #a8b1bc; color: #1f2328; }
+  .output-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .output-head { display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 7px; }
+  #out { flex: 1; min-height: 0; background: #fff; border: 1px solid #d8dee6;
+    border-radius: 10px; color: #2b323a; font-size: 13.5px; line-height: 1.6;
+    padding: 16px 18px; resize: none; outline: none; white-space: pre-wrap;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .05); }
+  #out[data-ready="0"] { color: #a3adba; }
+  /* single continuous progress bar, percentage inside */
+  .bar { position: relative; height: 34px; background: #e9edf2; border-radius: 10px;
+    overflow: hidden; }
+  .bar .fill { position: absolute; inset: 0; width: 0%; background: #0969da;
+    transition: width .25s linear; }
+  .bar.err .fill { background: #d1242f; }
+  .bar .lbl { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; font-size: 14px; font-weight: 700;
+    font-variant-numeric: tabular-nums; color: #5b6672; }
+  .bar .lbl.on { color: #fff; clip-path: inset(0 calc(100% - var(--p)) 0 0); }
+  .bar.err .lbl { color: #d1242f; }
+  /* status bar */
+  .status-bar { border-top: 1px solid #d8dee6; background: #fbfcfe; padding: 9px 30px;
+    font-size: 12.5px; color: #5b6672; display: flex; align-items: center; gap: 8px;
+    min-height: 38px; }
+  .status-bar .dot { width: 8px; height: 8px; border-radius: 50%; background: #a8b1bc;
+    flex-shrink: 0; }
+  .status-bar.busy .dot { background: #0969da; animation: blink 1s steps(2) infinite; }
+  .status-bar.ok .dot { background: #1a7f37; }
+  .status-bar.fail { color: #d1242f; }
+  .status-bar.fail .dot { background: #d1242f; }
+  @keyframes blink { 50% { opacity: .25; } }
+</style>
+</head>
+<body>
+  <div class="body">
+    <div class="headline">Video to summary
+      <small>Paste a link, get the major ideas — in the language of the video.</small>
+    </div>
+    <div>
+      <label for="url">Video URL (YouTube / VK / Rutube)</label>
+      <div class="row">
+        <input id="url" placeholder="https://www.youtube.com/watch?v=4eiQNRcoaWc">
+        <button id="go">Go</button>
+      </div>
+    </div>
+    <div class="output-wrap">
+      <div class="output-head">
+        <label style="margin:0">Summary</label>
+        <button id="copy">Copy</button>
+      </div>
+      <textarea id="out" data-ready="0" readonly
+        placeholder="Summary will appear here..."></textarea>
+    </div>
+    <div class="bar" id="bar">
+      <div class="fill" id="fill"></div>
+      <div class="lbl" id="lbl0">0%</div>
+      <div class="lbl on" id="lbl1">0%</div>
+    </div>
+  </div>
+  <div class="status-bar" id="sbar"><span class="dot"></span><span id="stext">Ready</span></div>
+
+<script>
+/* Internal stage division (download 50 / transcribe 40 / summarize 10) lives
+   in pipeline.py; this UI only ever sees one continuous percentage. */
+const HAS_BRIDGE = typeof window.pywebview !== "undefined";
+
+const go = document.getElementById("go");
+const url = document.getElementById("url");
+const out = document.getElementById("out");
+const bar = document.getElementById("bar");
+const fill = document.getElementById("fill");
+const lbl0 = document.getElementById("lbl0");
+const lbl1 = document.getElementById("lbl1");
+const sbar = document.getElementById("sbar");
+const stext = document.getElementById("stext");
+
+function setState(mode, text) {
+  sbar.className = "status-bar" + (mode ? " " + mode : "");
+  stext.textContent = text;
+}
+function setPct(p) {
+  p = Math.max(0, Math.min(100, Math.round(p)));
+  fill.style.width = p + "%";
+  bar.style.setProperty("--p", p + "%");
+  lbl0.textContent = p + "%";
+  lbl1.textContent = p + "%";
+}
+function error(text) {
+  bar.classList.add("err");
+  url.classList.add("err");
+  setState("fail", "Error: " + text);
+}
+function reset() {
+  setPct(0);
+  bar.classList.remove("err");
+  url.classList.remove("err");
+}
+
+function render(st) {
+  if (st.status === "running") {
+    setPct(st.total_pct);
+    setState("busy", st.message || "Working...");
+  } else if (st.status === "done") {
+    setPct(100);
+    out.value = st.summary || "";
+    out.dataset.ready = out.value ? "1" : "0";
+    setState("ok", "Done in " + st.wall_s.toFixed(1) + "s - summary written to " +
+      (st.output_dir || "output dir"));
+  } else if (st.status === "error") {
+    error(st.error || "unknown error");
+    go.disabled = false;
+  }
+}
+
+async function startPipeline() {
+  const u = url.value.trim();
+  if (!u) { error("paste a video URL first"); return; }
+  if (!/^https?:\/\//i.test(u)) { error("not a valid video URL"); return; }
+  go.disabled = true; reset();
+  out.dataset.ready = "0"; out.value = "";
+  if (HAS_BRIDGE) {
+    const err = await window.pywebview.api.start(u);
+    if (err) error(err.replace(/^error:\s*/, ""));
+  } else {
+    demo();  // opened as a plain page (mockup preview): fake animation
+  }
+}
+go.onclick = startPipeline;
+
+/* ---------- real backend: poll the Python bridge ---------- */
+if (HAS_BRIDGE) {
+  setInterval(async () => {
+    const st = await window.pywebview.api.get_state();
+    if (st.status !== "idle") render(st);
+  }, 150);
+}
+
+document.getElementById("copy").onclick = async () => {
+  if (!out.value) return;
+  try {
+    await navigator.clipboard.writeText(out.value);
+  } catch (e) {
+    out.focus(); out.select();
+    document.execCommand("copy");
+    out.blur();
+  }
+  setState("", "Copied to clipboard");
+};
+
+/* ---------- demo fallback (no bridge, e.g. mockup preview) ---------- */
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+async function demo() {
+  const STAGES = [
+    { name: "Download",   weight: 50, dur: 3000, msg: (p) => `downloading audio ${p}% ...` },
+    { name: "Transcribe", weight: 40, dur: 4200, msg: (p) => `transcribing on GPU ${p}% (~48x realtime)` },
+    { name: "Summarize",  weight: 10, dur: 3600, msg: (p) => `summarizing ${p}% (deepseek-v4-flash)` },
+  ];
+  setState("busy", "Working...");
+  const t0 = performance.now();
+  for (let i = 0; i < STAGES.length; i++) {
+    const st = STAGES[i];
+    for (let p = 0; p <= 100; p += 4) {
+      const done = STAGES.slice(0, i).reduce((a, s) => a + s.weight, 0) + st.weight * p / 100;
+      setPct(done);
+      setState("busy", `${st.name}: ${st.msg(p)}`);
+      await sleep(st.dur / 25);
+    }
+  }
+  out.value = "Demo mode: launch via gui.py to run the real pipeline.";
+  out.dataset.ready = "1";
+  setState("ok", "Demo finished");
+  go.disabled = false;
+}
+</script>
+</body>
+</html>

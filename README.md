@@ -18,7 +18,21 @@ implementation.
 - [x] Stage 1 implementation
 - [x] Stage 2 (audio -> transcript)
 - [x] Stage 3 (transcript -> summary)
-- [ ] Stage 4 (hardening / packaging)
+- [x] Stage 4 (GUI): pywebview window (ui/index.html), pipeline.py runner
+- [ ] Stage 5 (packaging): PyInstaller exe (deferred)
+
+## GUI
+
+Run by double-clicking `CoreCast.lnk` (pythonw + WebView2, no console), or:
+
+```
+python gui.py
+```
+
+The GUI wraps the three CLI stages via `pipeline.py`, mapping progress into
+one continuous 0-100% bar (internal split: download 50 / transcribe 40 /
+summarize 10). Run artifacts go to `%LOCALAPPDATA%/CoreCast/run/`.
+Regenerate the shortcut after moving the project: `make_shortcut.ps1`.
 
 ## Requirements
 
