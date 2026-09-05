@@ -15,9 +15,11 @@ Exit codes: 0 ok/skip | 1 engine failure | 2 input missing |
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -28,6 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_ENGINE = PROJECT_ROOT / "bin" / "nemo-speech.exe"
 DEFAULT_MODEL = PROJECT_ROOT / "models" / "parakeet-tdt-0.6b-v3.q8_0.gguf"
 MODELS_DIR = PROJECT_ROOT / "models"
+RTF_ESTIMATE = 50.0   # measured ~48-51x on RTX 4060 (full-context offline)
 
 
 # ------------------------------------------------------------------ utils
@@ -111,7 +114,6 @@ def main(argv=None):
     rep.status(f"[1/3] info      -> audio={fmt_dur(dur_s)}, "
                f"device={args.device or 'auto'}, "
                f"model={model.name}, format={args.format}")
-    rep.status(f"[2/3] transcribe -> {engine.name} (offline ASR, CUDA) ...")
 
     t1 = time.perf_counter()
     cmd = [str(engine), "transcribe", str(audio),
@@ -126,17 +128,47 @@ def main(argv=None):
         cmd += ["--verbose"]
     # generous timeout, scaled by audio duration (engine runs ~50x realtime)
     timeout = max(120, (dur_s or 0) / 20 + 60)
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace",
-                           timeout=timeout)
-    except subprocess.TimeoutExpired:
+
+    # estimated progress: the engine is one monolithic offline pass with no
+    # progress events, so the bar is wall-time vs expected wall-time
+    label = "[2/3] transcribe "
+    est_total = (dur_s / RTF_ESTIMATE) if dur_s else None
+    if est_total:
+        rep.phase_start("transcribe", label)
+    else:
+        rep.status(f"{label}-> {engine.name} (offline ASR, CUDA; "
+                   f"duration unknown) ...")
+
+    errf = tempfile.NamedTemporaryFile(prefix="corecast_asr_",
+                                       suffix=".log", delete=False)
+    errf.close()
+    timed_out = False
+    with open(errf.name, "w", encoding="utf-8", errors="replace") as eo:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=eo)
+        while proc.poll() is None:
+            elapsed = time.perf_counter() - t1
+            if elapsed > timeout:
+                proc.kill()
+                timed_out = True
+                break
+            if est_total:
+                rep.phase_update("transcribe", min(elapsed, est_total),
+                                 est_total, {"unit": "s"})
+            time.sleep(0.5)
+        rc = proc.poll()
+    rep.phase_done("transcribe")
+    dt = time.perf_counter() - t1
+    err_text = Path(errf.name).read_text(encoding="utf-8", errors="replace")
+    os.unlink(errf.name)
+
+    if timed_out:
         rep.status(f"ERROR: transcription timed out after {timeout:.0f}s (exit 1)")
         return 1
-    dt = time.perf_counter() - t1
+    rtf = f", ~{dur_s / dt:.0f}x realtime" if (dur_s and dt) else ""
+    rep.status(f"[2/3] transcribe -> done ({dt:.1f}s{rtf})")
 
-    if r.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
-        tail = (r.stderr.strip().splitlines() or ["engine failed"])[-1]
+    if rc != 0 or not out.is_file() or out.stat().st_size == 0:
+        tail = (err_text.strip().splitlines() or ["engine failed"])[-1]
         rep.status(f"ERROR: {tail} (exit 1)")
         return 1
 

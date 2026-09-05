@@ -112,6 +112,8 @@ def compose_bar(label, done, total, unit, speed, eta):
         size = human_bytes(done)
         if total:
             size += "/" + human_bytes(total)
+    elif unit == "s":
+        size = f"{done:.1f}s/{total:.1f}s"
     else:
         size = f"{done}/{total} fragments"
     bits = [bar, size]
@@ -137,11 +139,11 @@ class CLIReporter(Reporter):
         print(text, flush=True)
 
     def phase_start(self, phase, label):
-        if phase == "download":
-            self._bar = {"label": label, "done": 0, "total": None, "extra": {}}
+        self._bar = {"phase": phase, "label": label,
+                     "done": 0, "total": None, "extra": {}}
 
     def phase_update(self, phase, done, total=None, extra=None):
-        if phase != "download" or self._bar is None:
+        if self._bar is None or self._bar["phase"] != phase:
             return
         self._bar["done"] = done
         self._bar["total"] = total
@@ -149,7 +151,7 @@ class CLIReporter(Reporter):
         self._render()
 
     def phase_done(self, phase):
-        if phase == "download" and self._bar is not None:
+        if self._bar is not None and self._bar["phase"] == phase:
             self._end_bar()
             self._bar = None
 
@@ -203,8 +205,8 @@ class JSONReporter(Reporter):
             obj["speed_bps"] = ex["speed"]
         if ex.get("eta") is not None:
             obj["eta_s"] = ex["eta"]
-        if ex.get("unit") == "frag":
-            obj["unit"] = "frag"
+        if ex.get("unit"):
+            obj["unit"] = ex["unit"]
         self._emit(obj)
 
     def phase_done(self, phase):
