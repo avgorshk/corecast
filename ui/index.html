@@ -150,8 +150,7 @@ function render(st) {
     setPct(100);
     out.value = st.summary || "";
     out.dataset.ready = out.value ? "1" : "0";
-    setState("ok", "Done in " + st.wall_s.toFixed(1) + "s - summary written to " +
-      (st.output_dir || "output dir"));
+    setState("ok", "Done in " + st.wall_s.toFixed(1) + "s");
   } else if (st.status === "error") {
     error(st.error || "unknown error");
     go.disabled = false;

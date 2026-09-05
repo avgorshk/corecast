@@ -9,6 +9,7 @@ The HTML polls Api.get_state(); Api.start() spawns the pipeline worker.
 
 import os
 import sys
+import atexit
 from pathlib import Path
 
 if sys.stdout is None:          # running under pythonw.exe
@@ -33,8 +34,10 @@ class Api:
 
 def main():
     html = (PROJECT_ROOT / "ui" / "index.html").read_text(encoding="utf-8")
-    webview.create_window("CoreCast", html=html, width=820, height=700,
-                          min_size=(700, 560), js_api=Api())
+    win = webview.create_window("CoreCast", html=html, width=820, height=700,
+                                min_size=(700, 560), js_api=Api())
+    win.events.closing += runner.cleanup
+    atexit.register(runner.cleanup)   # belt and suspenders
     webview.start()
 
 

@@ -17,6 +17,7 @@ CLI smoke test:  python pipeline.py <url>
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -72,6 +73,10 @@ class PipelineRunner:
         with self._lock:
             return dict(self._state)
 
+    def cleanup(self):
+        """Remove all run artifacts (called when the app exits)."""
+        shutil.rmtree(RUN_ROOT, ignore_errors=True)
+
     # ------------------------------------------------------------ pipeline
 
     def _run(self, url):
@@ -109,7 +114,10 @@ class PipelineRunner:
                                    total_pct=100, message="Done",
                                    summary=text.strip(),
                                    wall_s=time.perf_counter() - t0,
-                                   output_dir=str(run_dir))
+                                   output_dir=None)
+            # the summary is in memory and on screen; drop the run files
+            # (on error we keep them for debugging until app exit)
+            shutil.rmtree(run_dir, ignore_errors=True)
         except PipelineError as e:
             with self._lock:
                 self._state.update(status="error", error=str(e),
