@@ -98,6 +98,8 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
     """POST chat completions (stream=True), feeding token progress to rep.
 
     quiet=True: no reporter events (used inside chunked loops).
+    Output length is unknowable up front, so the bar is indeterminate:
+    a spinner plus a live token counter (total=None).
     Retries on HTTP 429 with a backoff.
     Returns (full_text, error).
     """
@@ -133,10 +135,10 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
                         text_parts.append(content)
                         chars += len(content)
                         if not quiet:
-                            # rough token estimate for the bar
-                            rep.phase_update(phase, min(chars // 3,
-                                                       MAX_OUT_TOKENS),
-                                             MAX_OUT_TOKENS, {"unit": "tok"})
+                            # rough token count: indeterminate bar, live
+                            # counter (no total - output length unknown)
+                            rep.phase_update(phase, chars // 3, None,
+                                             {"unit": "tok"})
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
             if e.code == 429 and attempt < 4:
@@ -158,8 +160,6 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
         text = "".join(text_parts).strip()
         if text:
             if not quiet:
-                rep.phase_update(phase, MAX_OUT_TOKENS, MAX_OUT_TOKENS,
-                                 {"unit": "tok"})
                 rep.phase_done(phase)
             return text, None
         if attempt < 4:

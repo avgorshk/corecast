@@ -101,23 +101,26 @@ def fmt_eta(sec):
         else f"{s // 60}:{s % 60:02d}"
 
 
-def compose_bar(label, done, total, unit, speed, eta):
+SPIN_FRAMES = "|/-\\"
+
+
+def compose_bar(label, done, total, unit, speed, eta, spin=None):
     if total:
         pct = min(100.0, done / total * 100)
         filled = int(round(BAR_W * pct / 100))
         bar = "[" + "#" * filled + "-" * (BAR_W - filled) + f"] {pct:3.0f}%"
     else:
-        bar = "[  downloading ...  ]"
+        bar = f"[  {spin if spin is not None else '~'}  ]"
     if unit == "B":
         size = human_bytes(done)
         if total:
             size += "/" + human_bytes(total)
     elif unit == "s":
-        size = f"{done:.1f}s/{total:.1f}s"
+        size = f"{done:.1f}s/{total:.1f}s" if total else f"{done:.1f}s"
     elif unit == "tok":
-        size = f"{done}/{total} tok"
+        size = f"{done}/{total} tok" if total else f"{done} tok"
     else:
-        size = f"{done}/{total} fragments"
+        size = f"{done}/{total} fragments" if total else f"{done} fragments"
     bits = [bar, size]
     if speed:
         bits.append(human_speed(speed))
@@ -135,6 +138,7 @@ class CLIReporter(Reporter):
         self._mid_line = False
         self._last_pct = None
         self._last_t = 0.0
+        self._spin_i = 0
 
     def status(self, text):
         self._end_bar()
@@ -160,8 +164,13 @@ class CLIReporter(Reporter):
     def _render(self):
         b = self._bar
         ex = b["extra"]
+        spin = None
+        if not b["total"]:
+            self._spin_i = (self._spin_i + 1) % len(SPIN_FRAMES)
+            spin = SPIN_FRAMES[self._spin_i]
         line = compose_bar(b["label"], b["done"], b["total"],
-                           ex.get("unit", "B"), ex.get("speed"), ex.get("eta"))
+                           ex.get("unit", "B"), ex.get("speed"), ex.get("eta"),
+                           spin=spin)
         if self.tty:
             sys.stdout.write("\r" + line.ljust(90))
             sys.stdout.flush()
@@ -176,11 +185,17 @@ class CLIReporter(Reporter):
                 self._last_pct = 100.0
                 self._last_t = now
             return
-        due = (pct is not None and self._last_pct is not None
-               and pct - self._last_pct >= 10) or (now - self._last_t >= 30)
-        if due or self._last_pct is None:
+        if pct is None:  # indeterminate: first line + one every 30 s
+            due = self._last_t == 0.0 or (now - self._last_t >= 30)
+        else:
+            due = ((self._last_pct is not None
+                    and pct - self._last_pct >= 10)
+                   or (now - self._last_t >= 30)
+                   or self._last_pct is None)
+        if due:
             print(line, flush=True)
-            self._last_pct = pct
+            if pct is not None:
+                self._last_pct = pct
             self._last_t = now
 
     def _end_bar(self):
