@@ -9,9 +9,8 @@ Usage: python summarize.py <transcript.txt> [--model M] [--force] [-v]
 Key from environment (or the project .env file):
   deepseek: DEEPSEEK_API_KEY (platform.deepseek.com)
 
-Output: <dir>/summary.txt - structured summary in the transcript's
-        language: numbered sections with bold titles and bullets,
-        ending with a main-message paragraph. Author/video mentions ok.
+Output: <dir>/summary.txt - the major ideas of the transcript, in the
+        transcript's language. Author/video mentions ok.
 
 Long transcripts are chunked (map-reduce): each chunk is summarized
 separately, the partial summaries are merged into the final text.
@@ -41,20 +40,12 @@ DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 DEEPSEEK_MODEL = "deepseek-v4-flash"
 
 SYSTEM_PROMPT = (
-    "You are a summarization assistant. Extract the major thoughts from a "
-    "video transcript and present them as a structured summary. Format:\n"
-    "1. Numbered sections (8-12), each with a bold title and 2-3 short "
-    "bullet points.\n"
-    "2. Include specific facts from the transcript: numbers, examples, "
-    "names, quotes.\n"
-    "3. End with a final 'Главный посыл' paragraph (the main message of "
-    "the video).\n"
-    "4. Write in the same language as the transcript.\n"
-    "5. You may refer to the author, the video, and the speaker - the "
-    "summary should read like a review of the video's content.\n"
-    "6. Use markdown formatting: bold headers, bullets, numbered list.\n"
-    "7. Use only facts present in the transcript: never invent titles, "
-    "numbers, or names."
+    "You are a summarization assistant. Here is a video transcription "
+    "text. Please give me the major ideas from it.\n"
+    "1. Use the same language as the transcription.\n"
+    "2. Use only facts present in the transcript: never invent titles, "
+    "numbers, or names.\n"
+    "3. You may refer to the author or the video."
 )
 MAX_OUT_TOKENS = 8000
 CHUNK_CHARS = 200000   # single-pass safety limit; DeepSeek context is 128K tok
@@ -201,9 +192,9 @@ def summarize_transcript(cfg, rep, transcript):
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",
-             "content": ("Summarize this part of a transcript into structured "
-                         "notes: numbered sections with bold titles, 2-3 "
-                         "bullets each, include specifics.\n\n" + ch)},
+             "content": ("Summarize the major ideas from this part of a "
+                         "transcript. Use the same language as the "
+                         "transcript. Include specifics.\n\n" + ch)},
         ]
         text, err = chat_stream(cfg, messages, rep, quiet=True)
         if err:
@@ -218,11 +209,9 @@ def summarize_transcript(cfg, rep, transcript):
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user",
-         "content": ("Combine these partial structured summaries of the same "
-                     "video into ONE final structured summary. Keep the "
-                     "format: numbered sections with bold titles and "
-                     "bullets, then a final main-message paragraph. Remove "
-                     f"duplicated sections.\n\n{joined}")},
+         "content": ("Combine these partial summaries of the same video "
+                     "into ONE final summary of the major ideas. Remove "
+                     f"duplicated points.\n\n{joined}")},
     ]
     text, err = chat_stream(cfg, messages, rep, phase="merge")
     return text, err, len(chunks)

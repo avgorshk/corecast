@@ -7,8 +7,7 @@ Pipeline: public web video (YouTube / VK / Rutube) -> structured summary text.
 1. Downloads only the audio track of a video given its URL (yt-dlp).
 2. Transcribes it locally on GPU (NeMo-Speech.cpp, Parakeet-TDT-0.6B-v3).
 3. Summarizes the transcript with the DeepSeek API (deepseek-v4-flash):
-   numbered sections with bold titles and bullets, ending with a
-   main-message paragraph, in the language of the video.
+   the major ideas, in the language of the video.
 
 ## Status
 
@@ -38,7 +37,7 @@ python summarize.py <transcript.txt> [--model M] [--force] [--json-progress]
 - `fetch.py` - URL -> 16 kHz mono WAV (yt-dlp; progress bar / --json-progress)
 - `transcribe.py` - WAV -> transcript (nemo-speech, Parakeet-TDT-0.6B-v3,
   CUDA, ~50x realtime on an RTX 4060). `--force`: re-transcribe
-- `summarize.py` - transcript -> structured summary (DeepSeek API,
+- `summarize.py` - transcript -> major-ideas summary (DeepSeek API,
   deepseek-v4-flash by default, single-pass up to ~200k chars of
   transcript). `--model`: pick another DeepSeek model (e.g.
   deepseek-v4-pro for maximum detail).
