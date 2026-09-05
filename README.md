@@ -19,7 +19,7 @@ implementation.
 
 - [x] Stage 1 plan (URL -> audio WAV): docs/stage1-plan.md
 - [x] Stage 1 implementation
-- [ ] Stage 2 (audio -> transcript)
+- [x] Stage 2 (audio -> transcript)
 - [ ] Stage 3 (transcript -> summary)
 - [ ] Stage 4 (hardening / packaging)
 
@@ -28,11 +28,13 @@ implementation.
 - Python 3.11, ffmpeg/ffprobe on PATH
 - (later stages) NVIDIA GPU, faster-whisper, llama.cpp
 
-## Usage (planned)
+## Usage
 
 ```
 python fetch.py <url> [--out-dir DIR] [--force] [-v] [--json-progress]
+python transcribe.py <audio.wav> [--model PATH] [--device cuda] [--format text|json] [--force]
 ```
 
-- `--force`: re-download even if `audio.wav` exists
-- `--json-progress`: one JSON progress event per line (CI / GUI-ready)
+- `fetch.py` - URL -> 16 kHz mono WAV (yt-dlp; progress bar / --json-progress)
+- `transcribe.py` - WAV -> transcript (nemo-speech, Parakeet-TDT-0.6B-v3,
+  CUDA, ~50x realtime on an RTX 4060). `--force`: re-transcribe
