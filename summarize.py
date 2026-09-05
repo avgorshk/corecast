@@ -48,6 +48,9 @@ GIGACHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 GIGACHAT_OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 GIGACHAT_MODEL = "GigaChat"
 
+DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_MODEL = "deepseek-v4-pro"
+
 LOCAL_URL = "http://127.0.0.1:8081/v1/chat/completions"
 LOCAL_HEALTH = "http://127.0.0.1:8081/health"
 LOCAL_SERVER = PROJECT_ROOT / "vendor" / "llama.cpp-bin" / "llama-server.exe"
@@ -165,7 +168,8 @@ def setup_backend(backend, model):
                 "headers": {"Authorization": f"Bearer {key}",
                             "Content-Type": "application/json",
                             "User-Agent": USER_AGENT},
-                "ctx": None}, None
+                "ctx": None,
+                "chunk_chars": CHUNK_CHARS}, None
     if backend == "gigachat":
         cid = os.environ.get("GIGACHAT_CLIENT_ID")
         secret = os.environ.get("GIGACHAT_API_KEY")
@@ -185,7 +189,21 @@ def setup_backend(backend, model):
                 "headers": {"Authorization": f"Bearer {token}",
                             "Content-Type": "application/json",
                             "User-Agent": USER_AGENT},
-                "ctx": ssl.create_default_context(cafile=str(CERT_FILE))}, None
+                "ctx": ssl.create_default_context(cafile=str(CERT_FILE)),
+                "chunk_chars": CHUNK_CHARS}, None
+    if backend == "deepseek":
+        key = os.environ.get("DEEPSEEK_API_KEY")
+        if not key:
+            return None, "DEEPSEEK_API_KEY is not set (platform.deepseek.com)"
+        return {"url": DEEPSEEK_URL,
+                "model": model or DEEPSEEK_MODEL,
+                "headers": {"Authorization": f"Bearer {key}",
+                            "Content-Type": "application/json",
+                            "User-Agent": USER_AGENT},
+                "ctx": None,
+                # paid API: no free-tier TPM pacing, 128K context
+                "chunk_chars": 200000,
+                "max_tokens": 8000}, None
     if backend == "local":
         mfile = Path(model) if model else PROJECT_ROOT / "models" / \
             "qwen2.5-7b-instruct-q4_k_m.gguf"
@@ -226,11 +244,11 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
     """
     payload = {"model": cfg["model"],
                "messages": messages,
-               "max_tokens": MAX_OUT_TOKENS,
+               "max_tokens": cfg.get("max_tokens", MAX_OUT_TOKENS),
                "temperature": 0.2,
                "stream": True}
     data = json.dumps(payload).encode("utf-8")
-    est_total = MAX_OUT_TOKENS
+    est_total = cfg.get("max_tokens", MAX_OUT_TOKENS)
     if not quiet:
         rep.phase_start(phase, "[2/3] summarize ")
 
@@ -298,7 +316,8 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
 def summarize_transcript(cfg, rep, transcript):
     """Single-pass when short; chunked map-reduce when long.
     Returns (summary_text, error, n_chunks)."""
-    if len(transcript) <= CHUNK_CHARS:
+    limit = cfg.get("chunk_chars", CHUNK_CHARS)
+    if len(transcript) <= limit:
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",
@@ -307,7 +326,7 @@ def summarize_transcript(cfg, rep, transcript):
         text, err = chat_stream(cfg, messages, rep)
         return text, err, 1
 
-    chunks = split_chunks(transcript, CHUNK_CHARS)
+    chunks = split_chunks(transcript, limit)
     rep.phase_start("summarize", "[2/3] summarize ")
     parts = []
     for i, ch in enumerate(chunks, 1):
@@ -349,7 +368,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="summarize.py",
                                  description="CoreCast Stage 3: transcript -> summary")
     ap.add_argument("transcript", help="input transcript file")
-    ap.add_argument("--backend", choices=["groq", "gigachat", "local"], default="groq")
+    ap.add_argument("--backend", choices=["groq", "gigachat", "deepseek", "local"], default="groq")
     ap.add_argument("--model", help="override the backend's default model")
     ap.add_argument("--force", action="store_true",
                     help="re-summarize even if summary.txt exists")
@@ -379,7 +398,8 @@ def main(argv=None):
 
     transcript = t.read_text(encoding="utf-8", errors="replace")
     words = len(transcript.split())
-    mode = "single-pass" if len(transcript) <= CHUNK_CHARS else "map-reduce"
+    mode = ("single-pass" if len(transcript) <= cfg.get("chunk_chars", CHUNK_CHARS)
+            else "map-reduce")
     rep.status(f"[1/3] info      -> backend={args.backend}, "
                f"model={cfg['model']}, input={words} words, mode={mode}")
 
