@@ -96,7 +96,19 @@
 <script>
 /* Internal stage division (download 50 / transcribe 40 / summarize 10) lives
    in pipeline.py; this UI only ever sees one continuous percentage. */
-const HAS_BRIDGE = typeof window.pywebview !== "undefined";
+/* pywebview injects its API asynchronously; it is only guaranteed after
+   the 'pywebviewready' event (see pywebview docs, JS-Python bridge). */
+let PYAPI = null;
+window.addEventListener("pywebviewready", () => {
+  PYAPI = window.pywebview.api;
+  setState("", "Engine connected");
+  setInterval(async () => {          // poll the Python bridge
+    try {
+      const st = await PYAPI.get_state();
+      if (st.status !== "idle") render(st);
+    } catch (e) { /* transient */ }
+  }, 150);
+});
 
 const go = document.getElementById("go");
 const url = document.getElementById("url");
@@ -152,22 +164,14 @@ async function startPipeline() {
   if (!/^https?:\/\//i.test(u)) { error("not a valid video URL"); return; }
   go.disabled = true; reset();
   out.dataset.ready = "0"; out.value = "";
-  if (HAS_BRIDGE) {
-    const err = await window.pywebview.api.start(u);
+  if (PYAPI) {
+    const err = await PYAPI.start(u);
     if (err) error(err.replace(/^error:\s*/, ""));
   } else {
     demo();  // opened as a plain page (mockup preview): fake animation
   }
 }
 go.onclick = startPipeline;
-
-/* ---------- real backend: poll the Python bridge ---------- */
-if (HAS_BRIDGE) {
-  setInterval(async () => {
-    const st = await window.pywebview.api.get_state();
-    if (st.status !== "idle") render(st);
-  }, 150);
-}
 
 document.getElementById("copy").onclick = async () => {
   if (!out.value) return;
