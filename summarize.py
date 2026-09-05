@@ -22,11 +22,13 @@ Exit codes: 0 ok/skip | 1 API failure | 2 input missing |
 """
 
 import argparse
+import atexit
 import base64
 import json
 import os
 import re
 import ssl
+import subprocess
 import sys
 import time
 import urllib.error
@@ -45,6 +47,13 @@ GROQ_MODEL = "openai/gpt-oss-120b"  # free tier after the Aug-2026 Llama depreca
 GIGACHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 GIGACHAT_OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 GIGACHAT_MODEL = "GigaChat"
+
+LOCAL_URL = "http://127.0.0.1:8081/v1/chat/completions"
+LOCAL_HEALTH = "http://127.0.0.1:8081/health"
+LOCAL_SERVER = PROJECT_ROOT / "vendor" / "llama.cpp-bin" / "llama-server.exe"
+LOCAL_PORT = 8081
+LOCAL_CTX = 16384
+_spawned_server = []   # processes we started; killed at exit
 
 SYSTEM_PROMPT = (
     "You are a summarization assistant. Produce a standalone summary of the "
@@ -94,6 +103,53 @@ def gigachat_access_token(client_id, secret):
     return data.get("access_token")
 
 
+def ensure_local_server(model_path):
+    """Health-check the local llama-server; spawn it if not running.
+
+    Returns (server_ready, error).
+    """
+    def healthy():
+        try:
+            with urllib.request.urlopen(LOCAL_HEALTH, timeout=2) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
+    if healthy():
+        return True, None
+    if not LOCAL_SERVER.is_file():
+        return False, (f"llama-server not found: {LOCAL_SERVER} "
+                       f"(download llama.cpp CUDA binaries into vendor/)")
+    if not model_path.is_file():
+        return False, f"local model not found: {model_path}"
+
+    log = PROJECT_ROOT / "llama-server.log"
+    proc = subprocess.Popen(
+        [str(LOCAL_SERVER), "-m", str(model_path),
+         "-ngl", "99", "-c", str(LOCAL_CTX),
+         "--port", str(LOCAL_PORT), "--host", "127.0.0.1",
+         "--cache-type-k", "q8_0", "--cache-type-v", "q8_0"],
+        stdout=subprocess.DEVNULL,
+        stderr=open(log, "w", encoding="utf-8", errors="replace"))
+    _spawned_server.append(proc)
+    for _ in range(60):   # wait up to 60 s for model load
+        if proc.poll() is not None:
+            tail = log.read_text(encoding="utf-8", errors="replace")[-400:]
+            return False, f"llama-server exited early: {tail}"
+        if healthy():
+            return True, None
+        time.sleep(1)
+    return False, f"llama-server did not become ready (see {log})"
+
+
+def _cleanup_servers():
+    for p in _spawned_server:
+        p.terminate()
+
+
+atexit.register(_cleanup_servers)
+
+
 def setup_backend(backend, model):
     """Return (config_dict, error). config: url, model, headers, ctx."""
     if backend == "groq":
@@ -126,6 +182,16 @@ def setup_backend(backend, model):
                             "Content-Type": "application/json",
                             "User-Agent": USER_AGENT},
                 "ctx": ssl.create_default_context(cafile=str(CERT_FILE))}, None
+    if backend == "local":
+        mfile = Path(model) if model else PROJECT_ROOT / "models" / \
+            "qwen2.5-7b-instruct-q4_k_m.gguf"
+        ok, err = ensure_local_server(mfile)
+        if not ok:
+            return None, err
+        return {"url": LOCAL_URL,
+                "model": "qwen2.5-7b",
+                "headers": {"Content-Type": "application/json"},
+                "ctx": None}, None
     return None, f"unknown backend: {backend}"
 
 
@@ -274,7 +340,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="summarize.py",
                                  description="CoreCast Stage 3: transcript -> summary")
     ap.add_argument("transcript", help="input transcript file")
-    ap.add_argument("--backend", choices=["groq", "gigachat"], default="groq")
+    ap.add_argument("--backend", choices=["groq", "gigachat", "local"], default="groq")
     ap.add_argument("--model", help="override the backend's default model")
     ap.add_argument("--force", action="store_true",
                     help="re-summarize even if summary.txt exists")
