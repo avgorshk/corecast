@@ -114,6 +114,8 @@ def compose_bar(label, done, total, unit, speed, eta):
             size += "/" + human_bytes(total)
     elif unit == "s":
         size = f"{done:.1f}s/{total:.1f}s"
+    elif unit == "tok":
+        size = f"{done}/{total} tok"
     else:
         size = f"{done}/{total} fragments"
     bits = [bar, size]
