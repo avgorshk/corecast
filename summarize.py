@@ -56,18 +56,22 @@ LOCAL_CTX = 16384
 _spawned_server = []   # processes we started; killed at exit
 
 SYSTEM_PROMPT = (
-    "You are a summarization assistant. Produce a standalone summary of the "
-    "transcript's major thoughts. Rules:\n"
-    "1. Write plain text, no markdown formatting.\n"
-    "2. Write in the same language as the transcript.\n"
-    "3. The summary must be fully self-contained: never use the words "
-    "'author', 'video', 'speaker', 'narrator', 'transcript', 'episode', "
-    "'viewer', 'listener', or any reference to timestamps or the source "
-    "medium.\n"
-    "4. State ideas impersonally: 'the argument is that ...', never 'the "
-    "author argues that ...'."
+    "You are a summarization assistant. Extract the major thoughts from a "
+    "video transcript and present them as a structured summary. Format:\n"
+    "1. Numbered sections (8-12), each with a bold title and 2-3 short "
+    "bullet points.\n"
+    "2. Include specific facts from the transcript: numbers, examples, "
+    "names, quotes.\n"
+    "3. End with a final 'Главный посыл' paragraph (the main message of "
+    "the video).\n"
+    "4. Write in the same language as the transcript.\n"
+    "5. You may refer to the author, the video, and the speaker - the "
+    "summary should read like a review of the video's content.\n"
+    "6. Use markdown formatting: bold headers, bullets, numbered list.\n"
+    "7. Use only facts present in the transcript: never invent titles, "
+    "numbers, or names."
 )
-MAX_OUT_TOKENS = 1500
+MAX_OUT_TOKENS = 2500
 CHUNK_CHARS = 16000   # ~5.5-6.5k RU tokens: free-tier TPM limit is 8k per request
 
 
@@ -311,7 +315,9 @@ def summarize_transcript(cfg, rep, transcript):
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",
-             "content": f"Summarize this part of a transcript.\n\n{ch}"},
+             "content": ("Summarize this part of a transcript into structured "
+                         "notes: numbered sections with bold titles, 2-3 "
+                         "bullets each, include specifics.\n\n" + ch)},
         ]
         text, err = chat_stream(cfg, messages, rep, quiet=True)
         if err:
@@ -327,8 +333,11 @@ def summarize_transcript(cfg, rep, transcript):
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user",
-         "content": ("Combine these partial summaries of the same source into "
-                     f"one standalone summary.\n\n{joined}")},
+         "content": ("Combine these partial structured summaries of the same "
+                     "video into ONE final structured summary. Keep the "
+                     "format: numbered sections with bold titles and "
+                     "bullets, then a final main-message paragraph. Remove "
+                     f"duplicated sections.\n\n{joined}")},
     ]
     text, err = chat_stream(cfg, messages, rep, phase="merge")
     return text, err, len(chunks)
