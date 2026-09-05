@@ -1,62 +1,44 @@
 #!/usr/bin/env python3
-"""CoreCast Stage 3: transcript -> standalone summary via online LLM.
+"""CoreCast Stage 3: transcript -> structured summary via DeepSeek API.
 
-Backends: groq (free tier, OpenAI-compatible) and gigachat (Sber freemium).
+Backend: DeepSeek (paid key). Model: deepseek-v4-flash by default.
 
-Usage: python summarize.py <transcript.txt> [--backend groq|gigachat]
-              [--model M] [--force] [-v] [--json-progress]
+Usage: python summarize.py <transcript.txt> [--model M] [--force] [-v]
+              [--json-progress]
 
-Keys from environment (or the project .env file):
-  groq:     GROQ_API_KEY
-  gigachat: GIGACHAT_API_KEY (client secret) + GIGACHAT_CLIENT_ID
+Key from environment (or the project .env file):
+  deepseek: DEEPSEEK_API_KEY (platform.deepseek.com)
 
-Output: <dir>/summary.txt - standalone prose in the transcript's language,
-        no references to the source video, no timestamps.
+Output: <dir>/summary.txt - structured summary in the transcript's
+        language: numbered sections with bold titles and bullets,
+        ending with a main-message paragraph. Author/video mentions ok.
 
 Long transcripts are chunked (map-reduce): each chunk is summarized
-separately, the partial summaries are merged into the final text. Chunk
-size keeps single requests under free-tier token-per-minute limits.
+separately, the partial summaries are merged into the final text.
+DeepSeek's 128K context makes single-pass cover transcripts up to
+~200k chars; chunking is a safety net for anything longer.
 
 Exit codes: 0 ok/skip | 1 API failure | 2 input missing |
             3 credentials/config missing | 4 empty output | 5 usage
 """
 
 import argparse
-import atexit
-import base64
 import json
 import os
 import re
-import ssl
-import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
-import uuid
 from pathlib import Path
 
 from fetch import CLIReporter, JSONReporter, USER_AGENT, human_bytes
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 ENV_FILE = PROJECT_ROOT / ".env"
-CERT_FILE = PROJECT_ROOT / "certs" / "russian_trusted_root_ca.cer"
-
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "openai/gpt-oss-120b"  # free tier after the Aug-2026 Llama deprecations
-GIGACHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-GIGACHAT_OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
-GIGACHAT_MODEL = "GigaChat"
 
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
-DEEPSEEK_MODEL = "deepseek-v4-pro"
-
-LOCAL_URL = "http://127.0.0.1:8081/v1/chat/completions"
-LOCAL_HEALTH = "http://127.0.0.1:8081/health"
-LOCAL_SERVER = PROJECT_ROOT / "vendor" / "llama.cpp-bin" / "llama-server.exe"
-LOCAL_PORT = 8081
-LOCAL_CTX = 16384
-_spawned_server = []   # processes we started; killed at exit
+DEEPSEEK_MODEL = "deepseek-v4-flash"
 
 SYSTEM_PROMPT = (
     "You are a summarization assistant. Extract the major thoughts from a "
@@ -74,8 +56,8 @@ SYSTEM_PROMPT = (
     "7. Use only facts present in the transcript: never invent titles, "
     "numbers, or names."
 )
-MAX_OUT_TOKENS = 2500
-CHUNK_CHARS = 16000   # ~5.5-6.5k RU tokens: free-tier TPM limit is 8k per request
+MAX_OUT_TOKENS = 8000
+CHUNK_CHARS = 200000   # single-pass safety limit; DeepSeek context is 128K tok
 
 
 # ------------------------------------------------------------------ utils
@@ -92,129 +74,16 @@ def load_env():
         os.environ.setdefault(k.strip(), v.strip())
 
 
-def gigachat_access_token(client_id, secret):
-    """OAuth2 client-credentials against GigaChat (needs the RU CA bundle)."""
-    ctx = ssl.create_default_context(cafile=str(CERT_FILE))
-    auth = base64.b64encode(f"{client_id}:{secret}".encode()).decode()
-    req = urllib.request.Request(
-        GIGACHAT_OAUTH_URL,
-        data=b"scope=GIGACHAT_API_PERS",
-        method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded",
-                 "Accept": "application/json",
-                 "User-Agent": USER_AGENT,
-                 "Authorization": f"Basic {auth}",
-                 "RqUID": str(uuid.uuid4())})
-    with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
-        data = json.load(r)
-    return data.get("access_token")
-
-
-def ensure_local_server(model_path):
-    """Health-check the local llama-server; spawn it if not running.
-
-    Returns (server_ready, error).
-    """
-    def healthy():
-        try:
-            with urllib.request.urlopen(LOCAL_HEALTH, timeout=2) as r:
-                return r.status == 200
-        except Exception:
-            return False
-
-    if healthy():
-        return True, None
-    if not LOCAL_SERVER.is_file():
-        return False, (f"llama-server not found: {LOCAL_SERVER} "
-                       f"(download llama.cpp CUDA binaries into vendor/)")
-    if not model_path.is_file():
-        return False, f"local model not found: {model_path}"
-
-    log = PROJECT_ROOT / "llama-server.log"
-    proc = subprocess.Popen(
-        [str(LOCAL_SERVER), "-m", str(model_path),
-         "-ngl", "99", "-c", str(LOCAL_CTX),
-         "--port", str(LOCAL_PORT), "--host", "127.0.0.1",
-         "--cache-type-k", "q8_0", "--cache-type-v", "q8_0"],
-        stdout=subprocess.DEVNULL,
-        stderr=open(log, "w", encoding="utf-8", errors="replace"))
-    _spawned_server.append(proc)
-    for _ in range(60):   # wait up to 60 s for model load
-        if proc.poll() is not None:
-            tail = log.read_text(encoding="utf-8", errors="replace")[-400:]
-            return False, f"llama-server exited early: {tail}"
-        if healthy():
-            return True, None
-        time.sleep(1)
-    return False, f"llama-server did not become ready (see {log})"
-
-
-def _cleanup_servers():
-    for p in _spawned_server:
-        p.terminate()
-
-
-atexit.register(_cleanup_servers)
-
-
-def setup_backend(backend, model):
-    """Return (config_dict, error). config: url, model, headers, ctx."""
-    if backend == "groq":
-        key = os.environ.get("GROQ_API_KEY")
-        if not key:
-            return None, "GROQ_API_KEY is not set (free key: console.groq.com)"
-        return {"url": GROQ_URL,
-                "model": model or GROQ_MODEL,
-                "headers": {"Authorization": f"Bearer {key}",
-                            "Content-Type": "application/json",
-                            "User-Agent": USER_AGENT},
-                "ctx": None,
-                "chunk_chars": CHUNK_CHARS}, None
-    if backend == "gigachat":
-        cid = os.environ.get("GIGACHAT_CLIENT_ID")
-        secret = os.environ.get("GIGACHAT_API_KEY")
-        if not cid or not secret:
-            return None, ("GIGACHAT_CLIENT_ID / GIGACHAT_API_KEY not set "
-                          "(developers.sber.ru -> GigaChat API)")
-        if not CERT_FILE.is_file():
-            return None, f"RU CA bundle missing: {CERT_FILE}"
-        try:
-            token = gigachat_access_token(cid, secret)
-        except Exception as e:
-            return None, f"GigaChat OAuth failed: {e}"
-        if not token:
-            return None, "GigaChat OAuth returned no token"
-        return {"url": GIGACHAT_URL,
-                "model": model or GIGACHAT_MODEL,
-                "headers": {"Authorization": f"Bearer {token}",
-                            "Content-Type": "application/json",
-                            "User-Agent": USER_AGENT},
-                "ctx": ssl.create_default_context(cafile=str(CERT_FILE)),
-                "chunk_chars": CHUNK_CHARS}, None
-    if backend == "deepseek":
-        key = os.environ.get("DEEPSEEK_API_KEY")
-        if not key:
-            return None, "DEEPSEEK_API_KEY is not set (platform.deepseek.com)"
-        return {"url": DEEPSEEK_URL,
-                "model": model or DEEPSEEK_MODEL,
-                "headers": {"Authorization": f"Bearer {key}",
-                            "Content-Type": "application/json",
-                            "User-Agent": USER_AGENT},
-                "ctx": None,
-                # paid API: no free-tier TPM pacing, 128K context
-                "chunk_chars": 200000,
-                "max_tokens": 8000}, None
-    if backend == "local":
-        mfile = Path(model) if model else PROJECT_ROOT / "models" / \
-            "qwen2.5-7b-instruct-q4_k_m.gguf"
-        ok, err = ensure_local_server(mfile)
-        if not ok:
-            return None, err
-        return {"url": LOCAL_URL,
-                "model": "qwen2.5-7b",
-                "headers": {"Content-Type": "application/json"},
-                "ctx": None}, None
-    return None, f"unknown backend: {backend}"
+def get_config(model):
+    """Return (config_dict, error). config: url, model, headers."""
+    key = os.environ.get("DEEPSEEK_API_KEY")
+    if not key:
+        return None, "DEEPSEEK_API_KEY is not set (platform.deepseek.com)"
+    return {"url": DEEPSEEK_URL,
+            "model": model or DEEPSEEK_MODEL,
+            "headers": {"Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": USER_AGENT}}, None
 
 
 def split_chunks(text, limit):
@@ -238,17 +107,15 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
     """POST chat completions (stream=True), feeding token progress to rep.
 
     quiet=True: no reporter events (used inside chunked loops).
-    Retries on HTTP 429 using the server's own 'try again in Xs' hint
-    (free-tier TPM is a rolling per-minute budget).
+    Retries on HTTP 429 with a backoff.
     Returns (full_text, error).
     """
     payload = {"model": cfg["model"],
                "messages": messages,
-               "max_tokens": cfg.get("max_tokens", MAX_OUT_TOKENS),
+               "max_tokens": MAX_OUT_TOKENS,
                "temperature": 0.2,
                "stream": True}
     data = json.dumps(payload).encode("utf-8")
-    est_total = cfg.get("max_tokens", MAX_OUT_TOKENS)
     if not quiet:
         rep.phase_start(phase, "[2/3] summarize ")
 
@@ -257,8 +124,7 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
                                      headers=cfg["headers"])
         text_parts, chars = [], 0
         try:
-            with urllib.request.urlopen(req, timeout=180,
-                                        context=cfg.get("ctx")) as resp:
+            with urllib.request.urlopen(req, timeout=180) as resp:
                 for raw in resp:
                     line = raw.decode("utf-8", errors="replace").strip()
                     if not line.startswith("data:"):
@@ -277,8 +143,9 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
                         chars += len(content)
                         if not quiet:
                             # rough token estimate for the bar
-                            rep.phase_update(phase, min(chars // 3, est_total),
-                                             est_total, {"unit": "tok"})
+                            rep.phase_update(phase, min(chars // 3,
+                                                       MAX_OUT_TOKENS),
+                                             MAX_OUT_TOKENS, {"unit": "tok"})
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
             if e.code == 429 and attempt < 4:
@@ -300,7 +167,8 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
         text = "".join(text_parts).strip()
         if text:
             if not quiet:
-                rep.phase_update(phase, est_total, est_total, {"unit": "tok"})
+                rep.phase_update(phase, MAX_OUT_TOKENS, MAX_OUT_TOKENS,
+                                 {"unit": "tok"})
                 rep.phase_done(phase)
             return text, None
         if attempt < 4:
@@ -316,8 +184,7 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
 def summarize_transcript(cfg, rep, transcript):
     """Single-pass when short; chunked map-reduce when long.
     Returns (summary_text, error, n_chunks)."""
-    limit = cfg.get("chunk_chars", CHUNK_CHARS)
-    if len(transcript) <= limit:
+    if len(transcript) <= CHUNK_CHARS:
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",
@@ -326,7 +193,7 @@ def summarize_transcript(cfg, rep, transcript):
         text, err = chat_stream(cfg, messages, rep)
         return text, err, 1
 
-    chunks = split_chunks(transcript, limit)
+    chunks = split_chunks(transcript, CHUNK_CHARS)
     rep.phase_start("summarize", "[2/3] summarize ")
     parts = []
     for i, ch in enumerate(chunks, 1):
@@ -343,7 +210,6 @@ def summarize_transcript(cfg, rep, transcript):
             rep.phase_done("summarize")
             return None, f"chunk {i}/{len(chunks)}: {err}", len(chunks)
         parts.append(text)
-        time.sleep(2)  # keep sequential requests under the free-tier TPM window
     rep.phase_update("summarize", len(chunks), len(chunks), {"unit": "chunk"})
     rep.phase_done("summarize")
 
@@ -368,8 +234,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="summarize.py",
                                  description="CoreCast Stage 3: transcript -> summary")
     ap.add_argument("transcript", help="input transcript file")
-    ap.add_argument("--backend", choices=["groq", "gigachat", "deepseek", "local"], default="groq")
-    ap.add_argument("--model", help="override the backend's default model")
+    ap.add_argument("--model", default=DEEPSEEK_MODEL,
+                    help=f"DeepSeek model (default: {DEEPSEEK_MODEL})")
     ap.add_argument("--force", action="store_true",
                     help="re-summarize even if summary.txt exists")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -383,7 +249,7 @@ def main(argv=None):
     if not t.is_file():
         rep.status(f"ERROR: transcript not found: {t} (exit 2)")
         return 2
-    cfg, err = setup_backend(args.backend, args.model)
+    cfg, err = get_config(args.model)
     if err:
         rep.status(f"ERROR: {err} (exit 3)")
         return 3
@@ -398,10 +264,9 @@ def main(argv=None):
 
     transcript = t.read_text(encoding="utf-8", errors="replace")
     words = len(transcript.split())
-    mode = ("single-pass" if len(transcript) <= cfg.get("chunk_chars", CHUNK_CHARS)
-            else "map-reduce")
-    rep.status(f"[1/3] info      -> backend={args.backend}, "
-               f"model={cfg['model']}, input={words} words, mode={mode}")
+    mode = "single-pass" if len(transcript) <= CHUNK_CHARS else "map-reduce"
+    rep.status(f"[1/3] info      -> model={cfg['model']}, "
+               f"input={words} words, mode={mode}")
 
     t0 = time.perf_counter()
     text, err, n_chunks = summarize_transcript(cfg, rep, transcript)

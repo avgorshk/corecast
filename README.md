@@ -1,16 +1,14 @@
 # CoreCast
 
-Local pipeline: public web video (YouTube / VK / Rutube) -> standalone summary text.
+Pipeline: public web video (YouTube / VK / Rutube) -> structured summary text.
 
 ## What it does
 
-1. Downloads only the audio track of a video given its URL.
-2. Transcribes it locally (Whisper large-v3, GPU).
-3. Summarizes the transcript into a pure standalone text of the major
-   thoughts (local LLM) - no metadata, no timestamps, no references to
-   the source video.
-
-Everything runs on the local machine; no cloud APIs.
+1. Downloads only the audio track of a video given its URL (yt-dlp).
+2. Transcribes it locally on GPU (NeMo-Speech.cpp, Parakeet-TDT-0.6B-v3).
+3. Summarizes the transcript with the DeepSeek API (deepseek-v4-flash):
+   numbered sections with bold titles and bullets, ending with a
+   main-message paragraph, in the language of the video.
 
 ## Status
 
@@ -26,20 +24,21 @@ implementation.
 ## Requirements
 
 - Python 3.11, ffmpeg/ffprobe on PATH
-- (later stages) NVIDIA GPU, faster-whisper, llama.cpp
+- NVIDIA GPU (CUDA) for transcription
+- DeepSeek API key in `.env`: `DEEPSEEK_API_KEY` (platform.deepseek.com)
 
 ## Usage
 
 ```
 python fetch.py <url> [--out-dir DIR] [--force] [-v] [--json-progress]
 python transcribe.py <audio.wav> [--model PATH] [--device cuda] [--format text|json] [--force]
-python summarize.py <transcript.txt> [--backend groq|gigachat] [--model M] [--force] [--json-progress]
+python summarize.py <transcript.txt> [--model M] [--force] [--json-progress]
 ```
 
 - `fetch.py` - URL -> 16 kHz mono WAV (yt-dlp; progress bar / --json-progress)
 - `transcribe.py` - WAV -> transcript (nemo-speech, Parakeet-TDT-0.6B-v3,
   CUDA, ~50x realtime on an RTX 4060). `--force`: re-transcribe
-- `summarize.py` - transcript -> standalone summary (online LLM).
-  `groq` backend: free tier, set `GROQ_API_KEY` in `.env`;
-  `gigachat`: `GIGACHAT_CLIENT_ID` + `GIGACHAT_API_KEY` (Sber freemium).
-  Long transcripts are chunked (map-reduce) and rate limits self-paced.
+- `summarize.py` - transcript -> structured summary (DeepSeek API,
+  deepseek-v4-flash by default, single-pass up to ~200k chars of
+  transcript). `--model`: pick another DeepSeek model (e.g.
+  deepseek-v4-pro for maximum detail).
