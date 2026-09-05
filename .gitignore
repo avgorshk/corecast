@@ -6,5 +6,12 @@ __pycache__/
 # local data (downloaded audio, transcripts, summaries)
 data/
 
+# local model weights and third-party build sources
+models/
+vendor/
+
+# built runtime binaries
+bin/
+
 # secrets
 .env
