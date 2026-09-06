@@ -48,8 +48,8 @@ SYSTEM_PROMPT = (
     "numbers, or names.\n"
     "3. You may refer to the author or the video.\n"
     "4. Structure the answer as numbered sections (at most 5) with short "
-    "titles, and end with a closing summary thought. Keep the whole "
-    "answer within 4000 characters."
+    "titles, and finish with the main idea of the whole video. Keep the "
+    "whole answer within 4000 characters."
 )
 MAX_OUT_TOKENS = 32768     # thinking + answer share this budget (32k accepted)
 CHUNK_CHARS = 200000   # single-pass safety limit; DeepSeek context is 128K tok
@@ -226,10 +226,10 @@ def summarize_transcript(cfg, rep, transcript):
         {"role": "user",
          "content": ("Combine these partial summaries of the same video "
                      "into ONE final summary of the major ideas: at most "
-                     "5 numbered sections with short titles, ending with "
-                     "a closing summary thought, the whole answer within "
-                     "4000 characters. Remove duplicated points."
-                     f"\n\n{joined}")},
+                     "5 numbered sections with short titles, finishing "
+                     "with the main idea of the whole video, the whole "
+                     "answer within 4000 characters. Remove duplicated "
+                     f"points.\n\n{joined}")},
     ]
     text, err = chat_stream(cfg, messages, rep, phase="merge")
     return text, err, len(chunks)
