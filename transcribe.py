@@ -143,8 +143,10 @@ def main(argv=None):
                                        suffix=".log", delete=False)
     errf.close()
     timed_out = False
+    _NOWIN = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with open(errf.name, "w", encoding="utf-8", errors="replace") as eo:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=eo)
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=eo,
+                                creationflags=_NOWIN)
         while proc.poll() is None:
             elapsed = time.perf_counter() - t1
             if elapsed > timeout:

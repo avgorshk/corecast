@@ -26,6 +26,7 @@ Exit codes: 0 ok/skip | 1 yt-dlp failure | 2 live stream | 3 tools missing |
 import argparse
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -242,6 +243,9 @@ def find_tool(name):
     return shutil.which(name)
 
 
+_NOWIN = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
 def human_size(nbytes):
     return f"{nbytes / (1024 * 1024):.1f} MiB"
 
@@ -307,6 +311,7 @@ def probe_audio(path):
         [ffprobe, "-v", "error", "-show_streams", "-show_format",
          "-print_format", "json", str(path)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=_NOWIN,
         timeout=30)
     if r.returncode != 0:
         return None
@@ -379,7 +384,7 @@ def sample_audio_kbps(url, tmpdir, attempts=2):
                  "-t", str(PROBE_SECONDS), "-map", "0:a:0", "-c", "copy",
                  str(out)],
                 capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=60)
+                errors="replace", creationflags=_NOWIN, timeout=60)
         except subprocess.TimeoutExpired:
             r = None
         if r is not None and r.returncode == 0 and out.is_file():
@@ -387,7 +392,7 @@ def sample_audio_kbps(url, tmpdir, attempts=2):
                 ["ffprobe", "-v", "error", "-show_entries", "format=duration",
                  "-of", "csv=p=0", str(out)],
                 capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=20)
+                errors="replace", creationflags=_NOWIN, timeout=20)
             try:
                 dur = float(pr.stdout.strip())
                 if dur > 0:
@@ -512,6 +517,7 @@ def convert_to_wav(src, dst):
             ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src),
              "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dst)],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=_NOWIN,
             timeout=900)
     except subprocess.TimeoutExpired:
         return "ffmpeg conversion timed out"
