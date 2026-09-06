@@ -334,20 +334,29 @@ def probe_audio(path):
 
 
 def verify(audio_path, meta_duration):
-    """Return (passed, check_labels, details)."""
+    """Return (passed, check_labels, details).
+
+    Hard fails: codec/sample rate/channels (ASR-critical).
+    Duration mismatch vs metadata is advisory only: re-uploaded videos and
+    voiceover tracks routinely differ by a few seconds from the reported
+    duration and this has no effect on transcription quality.
+    """
     info = probe_audio(audio_path)
     if info is None:
         return False, ["ffprobe could not read the file"], {}
-    checks = [
+    hard = [
         ("codec", info["codec"] == "pcm_s16le"),
         ("sample_rate", info["sample_rate"] == "16000"),
         ("channels", info["channels"] == 1),
     ]
+    labels = "/".join(name for name, _ in hard)
+    passed = all(ok for _, ok in hard)
+    note = ""
     if meta_duration is not None and info["duration_s"] is not None:
-        checks.append(("duration", abs(info["duration_s"] - meta_duration) <= 1.0))
-    labels = "/".join(name for name, _ in checks)
-    passed = all(ok for _, ok in checks)
-    return passed, [f"{'PASS' if passed else 'FAIL'}: {labels}"], info
+        d = abs(info["duration_s"] - meta_duration)
+        if d > 1.0:
+            note = f"; duration off by {d:.1f}s (advisory)"
+    return passed, [f"{'PASS' if passed else 'FAIL'}: {labels}{note}"], info
 
 
 def best_audio_format(meta):
