@@ -624,6 +624,11 @@ def main(argv=None):
     passed, lines, info = verify(audio, duration)
     rep.status(f"[4/4] verify    -> [{lines[0]}]")
     if not passed:
+        got = ", ".join(f"{k}={info.get(k)}" for k in
+                        ("codec", "sample_rate", "channels", "duration_s")
+                        if k in info)
+        rep.status(f"ERROR: verification failed ({got or 'ffprobe unreadable'})"
+                   " (exit 4)")
         return 4
 
     wall = time.perf_counter() - t0

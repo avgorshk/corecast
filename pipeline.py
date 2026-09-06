@@ -139,6 +139,7 @@ class PipelineRunner:
                                 encoding="utf-8", errors="replace",
                                 bufsize=1, creationflags=creationflags)
         err_tail = ""
+        last_status = []  # last stdout status lines, for failure context
         for line in proc.stdout:
             line = line.strip()
             if not line:
@@ -156,6 +157,7 @@ class PipelineRunner:
                 on_event(ev, "")
             elif ev.get("type") == "status":
                 txt = ev.get("text", "")
+                last_status = (last_status + [txt])[-6:]
                 if txt.startswith("ERROR"):
                     raise PipelineError(txt)
                 on_event(ev, txt)
@@ -163,8 +165,11 @@ class PipelineRunner:
             err_tail = (err_tail + line)[-300:]
         proc.wait()
         if proc.returncode != 0:
+            ctx = " | ".join(last_status)
+            detail = f"  last: {ctx}" if ctx else ""
             raise PipelineError(
-                f"{script} failed (exit {proc.returncode}): {err_tail.strip()}")
+                f"{script} failed (exit {proc.returncode})"
+                f"{detail}  stderr: {err_tail.strip()}".strip())
 
     # ------------------------------------------------------- progress map
 
