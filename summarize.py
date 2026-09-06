@@ -37,7 +37,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 ENV_FILE = PROJECT_ROOT / ".env"
 
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
-DEEPSEEK_MODEL = "deepseek-v4-flash"
+DEEPSEEK_MODEL = "deepseek-v4-pro"
 
 SYSTEM_PROMPT = (
     "You are a summarization assistant. Here is a video transcription "
@@ -45,7 +45,9 @@ SYSTEM_PROMPT = (
     "1. Use the same language as the transcription.\n"
     "2. Use only facts present in the transcript: never invent titles, "
     "numbers, or names.\n"
-    "3. You may refer to the author or the video."
+    "3. You may refer to the author or the video.\n"
+    "4. Structure the answer as numbered sections with short titles, and "
+    "end with a closing summary thought."
 )
 MAX_OUT_TOKENS = 8000
 CHUNK_CHARS = 200000   # single-pass safety limit; DeepSeek context is 128K tok
