@@ -126,7 +126,9 @@ closes.
   ~50x realtime on an RTX 4060; 24 min of audio in ~30 s).
 - `summarize.py` - transcript -> structured summary. Deep thinking on by
   default (`thinking` enabled, `reasoning_effort=max`; tune with
-  `--effort low|high|max`). `--model deepseek-v4-flash`: ~3x faster and
+  `--effort low|high|max`). Format: at most 5 numbered sections with
+  short titles + closing summary thought, whole answer <= 4000
+  characters. `--model deepseek-v4-flash`: ~3x faster and
   much cheaper, leaner output. Thinking tokens are billed as output
   tokens.
 
