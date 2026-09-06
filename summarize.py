@@ -47,8 +47,9 @@ SYSTEM_PROMPT = (
     "2. Use only facts present in the transcript: never invent titles, "
     "numbers, or names.\n"
     "3. You may refer to the author or the video.\n"
-    "4. Structure the answer as numbered sections with short titles, and "
-    "end with a closing summary thought."
+    "4. Structure the answer as numbered sections (at most 5) with short "
+    "titles, and end with a closing summary thought. Keep the whole "
+    "answer within 4000 characters."
 )
 MAX_OUT_TOKENS = 32768     # thinking + answer share this budget (32k accepted)
 CHUNK_CHARS = 200000   # single-pass safety limit; DeepSeek context is 128K tok
@@ -206,8 +207,9 @@ def summarize_transcript(cfg, rep, transcript):
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",
              "content": ("Summarize the major ideas from this part of a "
-                         "transcript. Use the same language as the "
-                         "transcript. Include specifics.\n\n" + ch)},
+                         "transcript (at most 5 points). Use the same "
+                         "language as the transcript. Include specifics."
+                         "\n\n" + ch)},
         ]
         text, err = chat_stream(cfg, messages, rep, quiet=True)
         if err:
@@ -223,8 +225,11 @@ def summarize_transcript(cfg, rep, transcript):
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user",
          "content": ("Combine these partial summaries of the same video "
-                     "into ONE final summary of the major ideas. Remove "
-                     f"duplicated points.\n\n{joined}")},
+                     "into ONE final summary of the major ideas: at most "
+                     "5 numbered sections with short titles, ending with "
+                     "a closing summary thought, the whole answer within "
+                     "4000 characters. Remove duplicated points."
+                     f"\n\n{joined}")},
     ]
     text, err = chat_stream(cfg, messages, rep, phase="merge")
     return text, err, len(chunks)
