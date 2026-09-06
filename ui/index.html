@@ -30,9 +30,10 @@
     padding: 12px 30px; box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
   #go:hover { background: #0755b3; }
   #go:disabled { background: #c9d3df; cursor: default; }
-  #copy { background: #fff; color: #5b6672; border: 1px solid #d8dee6;
+  #copy, .btn-ghost { background: #fff; color: #5b6672; border: 1px solid #d8dee6;
     font-size: 12px; padding: 6px 14px; border-radius: 8px; }
-  #copy:hover { border-color: #a8b1bc; color: #1f2328; }
+  #copy:hover, .btn-ghost:hover { border-color: #a8b1bc; color: #1f2328; }
+  .head-btns { display: flex; gap: 8px; }
   .output-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .output-head { display: flex; justify-content: space-between; align-items: center;
     margin-bottom: 7px; }
@@ -80,7 +81,10 @@
     <div class="output-wrap">
       <div class="output-head">
         <label style="margin:0">Summary</label>
-        <button id="copy">Copy</button>
+        <div class="head-btns">
+          <button id="copy-transcript" class="btn-ghost">Copy Transcription</button>
+          <button id="copy-summary" class="btn-ghost">Copy Summary</button>
+        </div>
       </div>
       <textarea id="out" data-ready="0" readonly
         placeholder="Summary will appear here..."></textarea>
@@ -172,16 +176,37 @@ async function startPipeline() {
 }
 go.onclick = startPipeline;
 
-document.getElementById("copy").onclick = async () => {
-  if (!out.value) return;
+/* Copy buttons: shared clipboard helper with a textarea fallback (older
+   WebView2/edge cases where navigator.clipboard is unavailable). */
+async function copyText(text) {
+  if (!text) return false;
   try {
-    await navigator.clipboard.writeText(out.value);
+    await navigator.clipboard.writeText(text);
+    return true;
   } catch (e) {
-    out.focus(); out.select();
-    document.execCommand("copy");
-    out.blur();
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
   }
-  setState("", "Copied to clipboard");
+}
+
+document.getElementById("copy-summary").onclick = async () => {
+  if (!out.value) { setState("", "Nothing to copy yet"); return; }
+  if (await copyText(out.value)) setState("", "Summary copied to clipboard");
+};
+
+document.getElementById("copy-transcript").onclick = async () => {
+  if (!PYAPI) { setState("", "Run a video first (no engine)"); return; }
+  const t = await PYAPI.get_transcript();
+  if (!t) { setState("fail", "Error: no transcription available yet"); return; }
+  if (await copyText(t)) {
+    setState("", "Transcription copied to clipboard (" +
+      t.length.toLocaleString() + " chars)");
+  }
 };
 
 /* ---------- demo fallback (no bridge, e.g. mockup preview) ---------- */

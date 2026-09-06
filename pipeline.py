@@ -41,7 +41,7 @@ STAGES = [
 IDLE = {
     "status": "idle", "stage": "idle", "total_pct": 0,
     "message": "Ready", "error": None, "summary": None, "wall_s": 0.0,
-    "output_dir": None,
+    "output_dir": None, "transcript_path": None,
 }
 
 
@@ -103,6 +103,8 @@ class PipelineRunner:
             # stage 2: transcribe
             self._spawn("transcribe.py", [str(audio)],
                         self._on_transcribe)
+            with self._lock:  # files persist until app close -> copyable
+                self._state["transcript_path"] = str(transcript)
             # stage 3: summarize
             est = self._estimate_tokens(transcript)
             self._spawn("summarize.py", [str(transcript)],

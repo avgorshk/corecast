@@ -31,6 +31,16 @@ class Api:
     def get_state(self):
         return runner.state()
 
+    def get_transcript(self):
+        """Full transcript text for the Copy Transcription button."""
+        p = runner.state().get("transcript_path")
+        if not p:
+            return ""
+        try:
+            return Path(p).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
 
 def main():
     html = (PROJECT_ROOT / "ui" / "index.html").read_text(encoding="utf-8")
