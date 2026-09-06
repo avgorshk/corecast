@@ -120,6 +120,8 @@ def compose_bar(label, done, total, unit, speed, eta, spin=None):
         size = f"{done:.1f}s/{total:.1f}s" if total else f"{done:.1f}s"
     elif unit == "tok":
         size = f"{done}/{total} tok" if total else f"{done} tok"
+    elif unit == "think":
+        size = f"thinking {done} tok"
     else:
         size = f"{done}/{total} fragments" if total else f"{done} fragments"
     bits = [bar, size]

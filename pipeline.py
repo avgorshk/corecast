@@ -196,11 +196,19 @@ class PipelineRunner:
 
     def _on_summarize(self, ev, txt, est):
         if ev.get("phase") in ("summarize", "merge"):
-            tok = ev.get("done") or 0
-            frac = min(tok / est, 0.99)
-            self._update("summarize", 90 + int(10 * frac),
-                         f"Summarize: {int(tok)} tokens "
-                         f"(deepseek-v4-flash)")
+            if ev.get("unit") == "think":
+                # thinking stream: show activity, keep the bar at the
+                # segment start until the answer itself begins
+                n = int(ev.get("done") or 0)
+                self._update("summarize", 90,
+                             f"Summarize: thinking {n} tok "
+                             f"(deepseek-v4-pro, deep thinking)")
+            else:
+                tok = ev.get("done") or 0
+                frac = min(tok / est, 0.99)
+                self._update("summarize", 90 + int(10 * frac),
+                             f"Summarize: {int(tok)} tokens "
+                             f"(deepseek-v4-pro)")
         elif txt.startswith("OK"):
             self._update("summarize", 100, "Summarize: done")
 

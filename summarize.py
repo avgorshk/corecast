@@ -38,6 +38,7 @@ ENV_FILE = PROJECT_ROOT / ".env"
 
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 DEEPSEEK_MODEL = "deepseek-v4-pro"
+REASONING_EFFORT = "max"   # thinking effort: low | high | max (API default: high)
 
 SYSTEM_PROMPT = (
     "You are a summarization assistant. Here is a video transcription "
@@ -49,7 +50,7 @@ SYSTEM_PROMPT = (
     "4. Structure the answer as numbered sections with short titles, and "
     "end with a closing summary thought."
 )
-MAX_OUT_TOKENS = 8000
+MAX_OUT_TOKENS = 32768     # thinking + answer share this budget (32k accepted)
 CHUNK_CHARS = 200000   # single-pass safety limit; DeepSeek context is 128K tok
 
 
@@ -67,13 +68,14 @@ def load_env():
         os.environ.setdefault(k.strip(), v.strip())
 
 
-def get_config(model):
-    """Return (config_dict, error). config: url, model, headers."""
+def get_config(model, effort):
+    """Return (config_dict, error). config: url, model, headers, effort."""
     key = os.environ.get("DEEPSEEK_API_KEY")
     if not key:
         return None, "DEEPSEEK_API_KEY is not set (platform.deepseek.com)"
     return {"url": DEEPSEEK_URL,
             "model": model or DEEPSEEK_MODEL,
+            "effort": effort or REASONING_EFFORT,
             "headers": {"Authorization": f"Bearer {key}",
                         "Content-Type": "application/json",
                         "User-Agent": USER_AGENT}}, None
@@ -107,8 +109,9 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
     """
     payload = {"model": cfg["model"],
                "messages": messages,
+               "thinking": {"type": "enabled"},
+               "reasoning_effort": cfg.get("effort", REASONING_EFFORT),
                "max_tokens": MAX_OUT_TOKENS,
-               "temperature": 0.2,
                "stream": True}
     data = json.dumps(payload).encode("utf-8")
     if not quiet:
@@ -118,6 +121,7 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
         req = urllib.request.Request(cfg["url"], data=data, method="POST",
                                      headers=cfg["headers"])
         text_parts, chars = [], 0
+        reasoning_tok = 0
         try:
             with urllib.request.urlopen(req, timeout=180) as resp:
                 for raw in resp:
@@ -131,8 +135,15 @@ def chat_stream(cfg, messages, rep, phase="summarize", quiet=False):
                         obj = json.loads(chunk)
                         delta = (obj.get("choices") or [{}])[0].get("delta") or {}
                         content = delta.get("content") or ""
+                        reasoning = delta.get("reasoning_content") or ""
                     except json.JSONDecodeError:
                         continue
+                    if reasoning:
+                        reasoning_tok += len(reasoning) // 3
+                        if not quiet:
+                            # thinking stream: status tick, bar stays put
+                            rep.phase_update(phase, reasoning_tok, None,
+                                             {"unit": "think"})
                     if content:
                         text_parts.append(content)
                         chars += len(content)
@@ -227,6 +238,9 @@ def main(argv=None):
     ap.add_argument("transcript", help="input transcript file")
     ap.add_argument("--model", default=DEEPSEEK_MODEL,
                     help=f"DeepSeek model (default: {DEEPSEEK_MODEL})")
+    ap.add_argument("--effort", choices=["low", "high", "max"],
+                    default=REASONING_EFFORT,
+                    help=f"thinking effort (default: {REASONING_EFFORT})")
     ap.add_argument("--force", action="store_true",
                     help="re-summarize even if summary.txt exists")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -240,7 +254,7 @@ def main(argv=None):
     if not t.is_file():
         rep.status(f"ERROR: transcript not found: {t} (exit 2)")
         return 2
-    cfg, err = get_config(args.model)
+    cfg, err = get_config(args.model, args.effort)
     if err:
         rep.status(f"ERROR: {err} (exit 3)")
         return 3

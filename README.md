@@ -52,5 +52,6 @@ python summarize.py <transcript.txt> [--model M] [--force] [--json-progress]
 - `transcribe.py` - WAV -> transcript (nemo-speech, Parakeet-TDT-0.6B-v3,
   CUDA, ~50x realtime on an RTX 4060). `--force`: re-transcribe
 - `summarize.py` - transcript -> major-ideas summary (DeepSeek API,
-  deepseek-v4-pro by default, single-pass up to ~200k chars of
-  transcript). `--model deepseek-v4-flash`: ~3x faster, leaner output.
+  deepseek-v4-pro with deep thinking, single-pass up to ~200k chars of
+  transcript). `--effort low|high|max` tunes thinking depth (default max);
+  `--model deepseek-v4-flash`: ~3x faster, leaner output.
