@@ -114,10 +114,9 @@ class PipelineRunner:
                                    total_pct=100, message="Done",
                                    summary=text.strip(),
                                    wall_s=time.perf_counter() - t0,
-                                   output_dir=None)
-            # the summary is in memory and on screen; drop the run files
-            # (on error we keep them for debugging until app exit)
-            shutil.rmtree(run_dir, ignore_errors=True)
+                                   output_dir=str(run_dir))
+            # run files stay on disk until the app closes (cleanup wipes
+            # the whole %LOCALAPPDATA%/CoreCast tree then)
         except PipelineError as e:
             with self._lock:
                 self._state.update(status="error", error=str(e),
