@@ -155,6 +155,7 @@ function render(st) {
     out.value = st.summary || "";
     out.dataset.ready = out.value ? "1" : "0";
     setState("ok", "Done in " + st.wall_s.toFixed(1) + "s");
+    go.disabled = false;
   } else if (st.status === "error") {
     error(st.error || "unknown error");
     go.disabled = false;
