@@ -43,13 +43,9 @@ REASONING_EFFORT = "max"   # thinking effort: low | high | max (API default: hig
 SYSTEM_PROMPT = (
     "You are a summarization assistant. Here is a video transcription "
     "text. Please give me the major ideas from it.\n"
-    "1. Use the same language as the transcription.\n"
-    "2. Use only facts present in the transcript: never invent titles, "
-    "numbers, or names.\n"
-    "3. You may refer to the author or the video.\n"
-    "4. Structure the answer as numbered sections (at most 5) with short "
-    "titles, and finish with the main idea of the whole video. Keep the "
-    "whole answer within 4000 characters."
+    "Use the same language as the transcription.\n"
+    "Use only facts present in the transcript: never invent titles, "
+    "numbers, or names."
 )
 MAX_OUT_TOKENS = 32768     # thinking + answer share this budget (32k accepted)
 CHUNK_CHARS = 200000   # single-pass safety limit; DeepSeek context is 128K tok
