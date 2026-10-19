@@ -39,8 +39,11 @@
     margin-bottom: 7px; }
   #out { flex: 1; min-height: 0; background: #fff; border: 1px solid #d8dee6;
     border-radius: 10px; color: #2b323a; font-size: 13.5px; line-height: 1.6;
-    padding: 16px 18px; resize: none; outline: none; white-space: pre-wrap;
+    padding: 16px 18px; outline: none; white-space: pre-wrap; overflow: auto;
+    overflow-wrap: break-word; user-select: text;
     box-shadow: 0 1px 2px rgba(15, 23, 42, .05); }
+  #out:empty::before { content: "Summary will appear here..."; color: #a3adba; }
+  #out b { color: #1f2328; }
   #out[data-ready="0"] { color: #a3adba; }
   /* single continuous progress bar, percentage inside */
   .bar { position: relative; height: 34px; background: #e9edf2; border-radius: 10px;
@@ -86,8 +89,7 @@
           <button id="copy-summary" class="btn-ghost">Copy Summary</button>
         </div>
       </div>
-      <textarea id="out" data-ready="0" readonly
-        placeholder="Summary will appear here..."></textarea>
+      <div id="out" data-ready="0"></div>
     </div>
     <div class="bar" id="bar">
       <div class="fill" id="fill"></div>
@@ -146,14 +148,29 @@ function reset() {
   url.classList.remove("err");
 }
 
+/* Summary is markdown-ish (the model wraps titles/ideas in **bold**):
+   render it as HTML so bold shows as bold; keep the raw text for Copy. */
+let lastSummary = "";
+
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderSummary(text) {
+  lastSummary = text || "";
+  const html = escapeHtml(text || "")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  out.innerHTML = html;
+  out.dataset.ready = text ? "1" : "0";
+}
+
 function render(st) {
   if (st.status === "running") {
     setPct(st.total_pct);
     setState("busy", st.message || "Working...");
   } else if (st.status === "done") {
     setPct(100);
-    out.value = st.summary || "";
-    out.dataset.ready = out.value ? "1" : "0";
+    renderSummary(st.summary || "");
     setState("ok", "Done in " + st.wall_s.toFixed(1) + "s");
     go.disabled = false;
   } else if (st.status === "error") {
@@ -167,7 +184,7 @@ async function startPipeline() {
   if (!u) { error("paste a video URL first"); return; }
   if (!/^https?:\/\//i.test(u)) { error("not a valid video URL"); return; }
   go.disabled = true; reset();
-  out.dataset.ready = "0"; out.value = "";
+  out.dataset.ready = "0"; renderSummary("");
   if (PYAPI) {
     const err = await PYAPI.start(u);
     if (err) error(err.replace(/^error:\s*/, ""));
@@ -196,8 +213,8 @@ async function copyText(text) {
 }
 
 document.getElementById("copy-summary").onclick = async () => {
-  if (!out.value) { setState("", "Nothing to copy yet"); return; }
-  if (await copyText(out.value)) setState("", "Summary copied to clipboard");
+  if (!lastSummary) { setState("", "Nothing to copy yet"); return; }
+  if (await copyText(lastSummary)) setState("", "Summary copied to clipboard");
 };
 
 document.getElementById("copy-transcript").onclick = async () => {
@@ -229,8 +246,7 @@ async function demo() {
       await sleep(st.dur / 25);
     }
   }
-  out.value = "Demo mode: launch via gui.py to run the real pipeline.";
-  out.dataset.ready = "1";
+  renderSummary("Demo mode: launch via gui.py to run the real pipeline.");
   setState("ok", "Demo finished");
   go.disabled = false;
 }
