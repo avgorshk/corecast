@@ -43,9 +43,13 @@ REASONING_EFFORT = "max"   # thinking effort: low | high | max (API default: hig
 SYSTEM_PROMPT = (
     "You are a summarization assistant. Here is a video transcription "
     "text. Please give me the major ideas from it.\n"
-    "Use the same language as the transcription.\n"
-    "Use only facts present in the transcript: never invent titles, "
-    "numbers, or names."
+    "1. Use the same language as the transcription.\n"
+    "2. Use only facts present in the transcript: never invent titles, "
+    "numbers, or names.\n"
+    "3. You may refer to the author or the video.\n"
+    "4. Structure the answer as numbered sections with short titles, and "
+    "finish with the main idea of the whole video. Keep the summary "
+    "focused: major ideas only, skip minor details."
 )
 MAX_OUT_TOKENS = 32768     # thinking + answer share this budget (32k accepted)
 CHUNK_CHARS = 200000   # single-pass safety limit; DeepSeek context is 128K tok
@@ -203,7 +207,7 @@ def summarize_transcript(cfg, rep, transcript):
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",
              "content": ("Summarize the major ideas from this part of a "
-                         "transcript (at most 5 points). Use the same "
+                         "transcript. Use the same "
                          "language as the transcript. Include specifics."
                          "\n\n" + ch)},
         ]
@@ -221,10 +225,10 @@ def summarize_transcript(cfg, rep, transcript):
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user",
          "content": ("Combine these partial summaries of the same video "
-                     "into ONE final summary of the major ideas: at most "
-                     "5 numbered sections with short titles, finishing "
-                     "with the main idea of the whole video, the whole "
-                     "answer within 4000 characters. Remove duplicated "
+                     "into ONE final summary of the major ideas: "
+                     "numbered sections with short titles, finishing "
+                     "with the main idea of the whole video. Keep it "
+                     "focused: major ideas only. Remove duplicated "
                      f"points.\n\n{joined}")},
     ]
     text, err = chat_stream(cfg, messages, rep, phase="merge")
